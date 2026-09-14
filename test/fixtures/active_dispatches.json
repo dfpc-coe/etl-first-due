@@ -1,0 +1,37 @@
+[
+  {
+    "id": 900001,
+    "xref_id": "DEMO-2026-001",
+    "type": "TRAINING ONLY - medical response",
+    "status_code": "open",
+    "incident_type_code": "DEMO",
+    "unit_codes": ["DEMO-M1"],
+    "created_at": "2026-09-10T20:00:00Z",
+    "place_name": "Fictional training location",
+    "address": "100 Example Training Road",
+    "address2": "Training room A",
+    "city": "Example City",
+    "state_code": "CO",
+    "location": "100 Example Training Road, Example City, CO",
+    "latitude": 38.95,
+    "longitude": -105.05,
+    "message": "EXERCISE ONLY. Fictional dispatch and arbitrary demonstration coordinates.",
+    "call_notes": "20:00Z Training call created.\n20:02Z Use the training entrance. No real incident."
+  },
+  {
+    "id": 900002,
+    "xref_id": "DEMO-2026-002",
+    "type": "TRAINING ONLY - location pending",
+    "status_code": "open",
+    "incident_type_code": "DEMO",
+    "unit_codes": [],
+    "created_at": "2026-09-10T20:03:00Z",
+    "address": "Fictional location pending verification",
+    "city": "Example City",
+    "state_code": "CO",
+    "latitude": null,
+    "longitude": null,
+    "message": "EXERCISE ONLY. No verified coordinates.",
+    "call_notes": "Keep this call unlocated until a valid source location is available."
+  }
+]

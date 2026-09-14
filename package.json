@@ -1,0 +1,29 @@
+{
+    "name": "coe-etl-first-due",
+    "type": "module",
+    "private": true,
+    "version": "1.0.0",
+    "description": "Bring active First Due CAD dispatches into the TAK System",
+    "main": "task.ts",
+    "scripts": {
+        "lint": "eslint *.ts test",
+        "build": "tsc --build",
+        "test": "tsx --test test/*.test.ts"
+    },
+    "author": "Nicholas Ingalls <nicholas.ingalls@state.co.us>",
+    "license": "ISC",
+    "engines": {
+        "node": ">= 24"
+    },
+    "devDependencies": {
+        "@eslint/js": "^10.0.0",
+        "eslint": "^10.0.0",
+        "tsx": "^4.23.12",
+        "typescript": "^6.0.0",
+        "typescript-eslint": "^8.0.0"
+    },
+    "dependencies": {
+        "@sinclair/typebox": "^0.34.0",
+        "@tak-ps/etl": "^10.0.0"
+    }
+}

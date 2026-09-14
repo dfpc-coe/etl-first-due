@@ -1,0 +1,62 @@
+name: AWS ECR ETL
+
+on:
+  push:
+    tags:
+      - '*'
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    if: github.event.pull_request.draft == false
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{github.event.pull_request.head.sha || github.sha}}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Install CloudTAK ETL CLI
+        run: npm install --global @tak-ps/etl
+
+      - name: Configure AWS Credentials (Prod)
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: arn:aws-us-gov:iam::${{secrets.AWS_ACCOUNT_ID}}:role/Github-ECR-Builder
+          role-session-name: GithubECRBuilder
+          aws-region: ${{secrets.AWS_REGION}}
+
+      - name: Build & Push ETL to Prod (COTAK & WFTAK)
+        env:
+          AWS_ACCOUNT_ID: ${{secrets.AWS_ACCOUNT_ID}}
+          AWS_REGION: ${{secrets.AWS_REGION}}
+        run: |
+          for environment in cotak-prod wftak-prod; do
+            Environment="$environment" cloudtak-etl
+          done
+
+      - name: Configure AWS Credentials (Staging)
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: arn:aws:iam::${{secrets.AWS_STAGING_ACCOUNT_ID}}:role/Github-ECR-Builder
+          role-session-name: GithubECRBuilder
+          aws-region: ${{secrets.AWS_STAGING_REGION}}
+
+      - name: Build & Push ETL to Staging (COTAK & WFTAK)
+        env:
+          AWS_ACCOUNT_ID: ${{secrets.AWS_STAGING_ACCOUNT_ID}}
+          AWS_REGION: ${{secrets.AWS_STAGING_REGION}}
+        run: |
+          for environment in cotak-staging wftak-staging; do
+            Environment="$environment" cloudtak-etl
+          done
