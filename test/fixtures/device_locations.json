@@ -1,0 +1,37 @@
+[
+  {
+    "id": 1,
+    "name": "DEMO-E1",
+    "type": "Fire Department Engine",
+    "latitude": "38.9500000",
+    "longitude": "-105.0500000",
+    "status_code": "active",
+    "updated_at": "2026-09-10T20:05:00+00:00",
+    "responder_status": "Responding",
+    "responder_status_code": "responding",
+    "responding_address": "100 Example Training Road",
+    "responding_dispatch_place_location": "100 Example Training Road, Example City, CO",
+    "fire_station_id": 113,
+    "fire_station_name_or_number": "Training Station 1"
+  },
+  {
+    "id": 2,
+    "name": "DEMO-M1",
+    "type": "Ambulance",
+    "latitude": null,
+    "longitude": null,
+    "status_code": "active",
+    "updated_at": "2026-09-10T20:06:00+00:00",
+    "responder_status": "On Station",
+    "responder_status_code": "on_station"
+  },
+  {
+    "id": 3,
+    "name": "DEMO-RESERVE",
+    "type": "Fire Department Engine",
+    "latitude": "38.9600000",
+    "longitude": "-105.0600000",
+    "status_code": "inactive",
+    "updated_at": "2026-08-01T12:00:00+00:00"
+  }
+]

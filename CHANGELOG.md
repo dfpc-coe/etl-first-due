@@ -12,6 +12,13 @@
 
 ### Pending Release
 
+### v1.2.0
+
+- :tada: Add `DataType` option to post either `CAD` active calls or `AVL` device locations from `GET /device-locations`
+- :tada: Expose `device` as a named Output schema
+- :rocket: Submit features through the layer CoT API so that layer styling is applied
+- :rocket: Move feature mapping & Output schemas into `lib/features.ts` and value coercion into `lib/parse.ts`
+
 ### v1.1.0
 
 - :tada: Expose `dispatch` as a named Output schema and submit active calls against it via the CloudTAK `/submit` API

@@ -3,7 +3,7 @@
     "type": "module",
     "private": true,
     "version": "1.1.0",
-    "description": "Bring active First Due CAD dispatches into the TAK System",
+    "description": "Bring active First Due CAD dispatches & AVL device locations into the TAK System",
     "main": "task.ts",
     "scripts": {
         "lint": "eslint *.ts lib test",

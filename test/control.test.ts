@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import type { Static } from '@sinclair/typebox';
-import type { SubmitFeatureCollection } from '@tak-ps/etl';
+import type { Feature } from '@tak-ps/node-cot';
 
 process.env.ETL_API = process.env.ETL_API || 'http://localhost:5001';
 process.env.ETL_LAYER = process.env.ETL_LAYER || '1';
@@ -13,6 +13,7 @@ process.env.ETL_TOKEN = process.env.ETL_TOKEN || 'etl.test-token';
 const { default: Task } = await import('../task.js');
 
 const fixture = JSON.parse(fs.readFileSync(new URL('./fixtures/active_dispatches.json', import.meta.url), 'utf8'));
+const devices = JSON.parse(fs.readFileSync(new URL('./fixtures/device_locations.json', import.meta.url), 'utf8'));
 
 type Mock = {
     base: string;
@@ -23,8 +24,8 @@ type Mock = {
 };
 
 /**
- * Minimal First Due API - token endpoint, a two page active dispatch feed &
- * a dispatches endpoint carrying the enrichment fields
+ * Minimal First Due API - token endpoint, a two page active dispatch feed,
+ * a dispatches endpoint carrying the enrichment fields & an AVL device feed
  */
 async function mock(opts: { rejectFirst?: boolean } = {}): Promise<Mock> {
     const state: Mock = {
@@ -92,6 +93,10 @@ async function mock(opts: { rejectFirst?: boolean } = {}): Promise<Mock> {
             ]);
         }
 
+        if (url.pathname === '/fd-api/v1/device-locations') {
+            return json(200, [...devices, devices[0]]);
+        }
+
         json(404, { code: 0, message: 'not found' });
     });
 
@@ -121,8 +126,8 @@ async function run(api: Mock, environment: Record<string, unknown>, ephemeral: R
         layer.incoming.ephemeral = ephem;
     };
 
-    let submitted: Static<typeof SubmitFeatureCollection> | null = null;
-    task.submit = async (fc: Static<typeof SubmitFeatureCollection>) => {
+    let submitted: Static<typeof Feature.InputFeatureCollection> | null = null;
+    task.submit = async (fc: Static<typeof Feature.InputFeatureCollection>) => {
         submitted = fc;
         return true;
     };
@@ -158,7 +163,7 @@ test('control - paginates, dedupes, drops closed & skips unlocated', async () =>
         ]);
 
         assert.ok(submitted);
-        assert.equal(submitted.schema, 'dispatch');
+        assert.equal('schema' in submitted, false);
         assert.equal(submitted.features.length, 1);
         assert.equal(submitted.features[0].id, 'first-due-900001');
         assert.match(submitted.features[0].properties.remarks, /20:00Z Training call created/);
@@ -228,6 +233,38 @@ test('control - enrichment merges GET /dispatches fields', async () => {
         assert.equal(feat.properties.metadata.alarm_level, '01');
         assert.match(feat.properties.remarks, /Cross Streets: MAIN ST \/ 1ST AVE/);
         assert.doesNotMatch(feat.properties.remarks, /Call Notes/);
+    } finally {
+        await api.close();
+    }
+});
+
+test('control - AVL posts located & active devices', async () => {
+    const api = await mock();
+
+    try {
+        const { submitted } = await run(api, {
+            Email: 'api@example.com',
+            Password: 'secret',
+            BaseURL: `${api.base}/fd-api/v1/`,
+            DataType: 'AVL',
+            IncludeNotes: true,
+            EnrichDispatches: true,
+            FallbackCoordinates: '38.8419,-105.0522',
+            StaleMinutes: 10,
+            DEBUG: false
+        });
+
+        assert.deepEqual(api.requests.map((r) => r.url), [
+            '/fd-api/v1/auth/token',
+            '/fd-api/v1/device-locations'
+        ]);
+
+        assert.ok(submitted);
+        assert.equal('schema' in submitted, false);
+        assert.equal(submitted.features.length, 1);
+        assert.equal(submitted.features[0].id, 'first-due-device-1');
+        assert.equal(submitted.features[0].properties.callsign, 'DEMO-E1');
+        assert.deepEqual(submitted.features[0].geometry.coordinates, [-105.05, 38.95]);
     } finally {
         await api.close();
     }

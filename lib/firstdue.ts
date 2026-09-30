@@ -11,6 +11,7 @@ const TOKEN_REFRESH_MARGIN_MS = 60 * 60 * 1000;
 
 const ACTIVE_PATH = 'get-units-by-dispatches';
 const DISPATCHES_PATH = 'dispatches';
+const DEVICES_PATH = 'device-locations';
 const MAX_PAGES = 50;
 
 const Nullable = <T extends TSchema>(type: T) => Type.Union([Type.Null(), type]);
@@ -55,6 +56,23 @@ export const DispatchDetail = Type.Pick(Dispatch, [
     'fire_zone',
     'fire_stations'
 ]);
+
+/** AVL record as returned by GET /device-locations */
+export const DeviceLocation = Type.Object({
+    id: Type.Union([Type.Integer(), Type.String()]),
+    name: Type.Optional(Nullable(Type.String())),
+    type: Type.Optional(Nullable(Type.String())),
+    latitude: Type.Optional(Nullable(Type.Union([Type.Number(), Type.String()]))),
+    longitude: Type.Optional(Nullable(Type.Union([Type.Number(), Type.String()]))),
+    status_code: Type.Optional(Nullable(Type.String())),
+    updated_at: Type.Optional(Nullable(Type.String())),
+    responder_status: Type.Optional(Nullable(Type.String())),
+    responder_status_code: Type.Optional(Nullable(Type.String())),
+    responding_address: Type.Optional(Nullable(Type.String())),
+    responding_dispatch_place_location: Type.Optional(Nullable(Type.String())),
+    fire_station_id: Type.Optional(Nullable(Type.Union([Type.Integer(), Type.String()]))),
+    fire_station_name_or_number: Type.Optional(Nullable(Type.String()))
+});
 
 const TokenResponse = Type.Object({
     access_token: Type.String(),
@@ -108,7 +126,7 @@ export function nextLink(header: string | null | undefined, current: URL, params
 }
 
 /**
- * Thin client over the First Due REST API dispatch endpoints this task uses
+ * Thin client over the First Due REST API dispatch & AVL endpoints this task uses
  */
 export default class FirstDue {
     base: URL;
@@ -146,6 +164,11 @@ export default class FirstDue {
         return await this.list(DISPATCHES_PATH, DispatchDetail, {
             since: since.toISOString().replace(/\.\d{3}Z$/, 'Z')
         });
+    }
+
+    /** AVL device locations - GET /device-locations */
+    async devices(): Promise<Array<Static<typeof DeviceLocation>>> {
+        return await this.list(DEVICES_PATH, DeviceLocation, {});
     }
 
     /** Request a Bearer Token, expiring it an hour before First Due does */

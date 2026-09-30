@@ -1,6 +1,6 @@
 <h1 align='center'>ETL-First-Due</h1>
 
-<p align='center'>Bring active First Due CAD dispatches into the TAK System</p>
+<p align='center'>Bring active First Due CAD dispatches & AVL device locations into the TAK System</p>
 
 ## Setup
 
@@ -8,7 +8,7 @@
    **Email** and **Password** pair used against `POST /auth/token` - human user credentials should not be shared with
    the integration.
 2. Confirm with First Due that the account is permitted to read dispatches (`GET /get-units-by-dispatches`) and, if
-   `EnrichDispatches` will be enabled, `GET /dispatches`.
+   `EnrichDispatches` will be enabled, `GET /dispatches`. AVL layers require `GET /device-locations`.
 3. Provide the credentials to the ETL First Due Integration.
 
 ## Configuration
@@ -18,11 +18,15 @@
 | `Email` | Yes | Email of the First Due API service account |
 | `Password` | Yes | Password of the First Due API service account |
 | `BaseURL` | No | Base URL of the First Due REST API - defaults to `https://sizeup.firstduesizeup.com/fd-api/v1/` |
-| `IncludeNotes` | No | Include the CAD dispatch `message` and `call_notes` in the marker remarks - defaults to `true` |
-| `EnrichDispatches` | No | Also query `GET /dispatches` to add cross streets, radio channel and alarm level. Roughly doubles the number of API requests per poll - defaults to `false` |
-| `FallbackCoordinates` | No | `Latitude,Longitude` used to place calls that have no verified coordinates - ie `38.8419,-105.0522`. Unlocated calls are skipped when unset |
+| `DataType` | No | `CAD` posts active dispatch locations, `AVL` posts device locations - defaults to `CAD` |
+| `IncludeNotes` | No | CAD Only: Include the CAD dispatch `message` and `call_notes` in the marker remarks - defaults to `true` |
+| `EnrichDispatches` | No | CAD Only: Also query `GET /dispatches` to add cross streets, radio channel and alarm level. Roughly doubles the number of API requests per poll - defaults to `false` |
+| `FallbackCoordinates` | No | CAD Only: `Latitude,Longitude` used to place calls that have no verified coordinates - ie `38.8419,-105.0522`. Unlocated calls are skipped when unset |
 | `StaleMinutes` | No | Minutes after the last successful poll before a marker is shown as stale on TAK clients - defaults to `10` |
 | `DEBUG` | No | Print raw API responses in the layer logs |
+
+A layer posts either CAD or AVL data. To bring both into TAK, create two layers that share the same credentials - one
+with `DataType: CAD` and one with `DataType: AVL`.
 
 ## How it Works
 
@@ -31,16 +35,18 @@
 | Authenticate | `POST /auth/token` | JSON body with `grant_type: client_credentials`, `email` & `password`. Returns a Bearer token valid for 14 days |
 | Active Calls | `GET /get-units-by-dispatches?active_only=true` | Paginated 20 per page via the `Link` header `rel="next"` relation |
 | Enrich (optional) | `GET /dispatches?since=<oldest active created_at>` | Adds `cross_streets`, `radio_channel`, `alarm_level`, `fire_zone` & `fire_stations` |
+| Device Locations | `GET /device-locations` | Only requested when `DataType` is `AVL` - replaces the Active Calls & Enrich steps |
 
 The Bearer token is cached in the layer's ephemeral store and reused until an hour before it expires. If First Due rejects
 the cached token the ETL re-authenticates once and retries the request.
 
-Every poll retrieves the complete set of active calls. If any page fails the poll is aborted and nothing is submitted so a
+Every poll retrieves the complete set of active calls or device locations. If any page fails the poll is aborted and nothing is submitted so a
 partial snapshot never causes calls to disappear. Pagination follows the `Link` header, re-applies `active_only=true` on
 every page (the documented examples omit it) and refuses to follow links to a different origin.
 
-Active calls are submitted against the `dispatch` named Output schema - select it in the CloudTAK Layer Schema & Styles
-panels to map or style calls. Calls that are not matched by a Mapping are delivered to the map as CoT.
+The task exposes two named Output schemas - `dispatch` (active calls) and `device` (AVL device locations) - select the
+schema matching the layer's `DataType` in the CloudTAK Layer Schema & Styles panels. Features are submitted through the
+layer CoT API so the layer's styling is applied to them.
 
 ### Marker Behaviour
 
@@ -60,6 +66,16 @@ panels to map or style calls. Calls that are not matched by a Mapping are delive
   they are placed there with an `UNLOCATED - ` callsign prefix, a `Location: UNVERIFIED` remark and `located: false` in
   the metadata. When unset they are skipped.
 
+### AVL Marker Behaviour
+
+- Each device is posted with the stable ID `first-due-device-<id>` and the device `name` as its callsign.
+- Remarks carry the device type, responder status, the address being responded to, the assigned station and the time
+  of the last location update. The full record (minus coordinates) is available in the feature metadata.
+- Devices with a `status_code` other than `active` and devices with missing, non-numeric, out of range or `0,0`
+  coordinates are skipped - `FallbackCoordinates` is never applied to a device.
+- The marker time is the device's `updated_at` while the stale time is `StaleMinutes` after the poll, so a device that
+  has stopped reporting remains on the map at its last known location for as long as First Due returns it.
+
 ### Limitations
 
 - The `since` parameter on both dispatch endpoints filters on creation time only, so the ETL always retrieves the full
@@ -72,6 +88,9 @@ panels to map or style calls. Calls that are not matched by a Mapping are delive
 - Whether `call_notes` reflects the complete current CAD narrative, including later corrections, depends on the agency's
   CAD to First Due integration and should be verified during a pilot.
 - Retrieval is capped at 50 pages (1000 active calls) per poll.
+- First Due documents a single example of `GET /device-locations` with no parameters or pagination. `Link` header
+  pagination is followed if it is returned. Devices can be apparatus or the mobile devices of individual responders -
+  confirm with the agency which devices report before sharing the layer.
 
 ## Development
 
@@ -105,8 +124,9 @@ cp .env dist/
 node dist/task.js
 ```
 
-API calls to First Due - authentication, pagination & record validation - live in the `lib/firstdue.ts` client while
-`task.ts` holds the control flow and maps dispatches to features.
+`task.ts` holds only the control flow. API calls to First Due - authentication, pagination & record validation - live in
+the `lib/firstdue.ts` client, `lib/features.ts` maps dispatches & devices to CoT features and defines the Output schemas,
+and `lib/parse.ts` holds the value coercion helpers.
 
 Run the unit tests with
 

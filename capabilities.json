@@ -1,7 +1,7 @@
 {
     "version": "1.0",
     "name": "First Due",
-    "description": "Ingests active CAD dispatches from the First Due REST API and posts each call - location, address, assigned units, dispatch message and call notes - to the map.",
+    "description": "Ingests active CAD dispatches or AVL device locations from the First Due REST API and posts each call - location, address, assigned units, dispatch message and call notes - or device to the map.",
     "compute": {
         "memory": 512,
         "timeout": 60
@@ -10,13 +10,13 @@
         {
             "resource": "feature:*",
             "required": true,
-            "description": "First Due posts active dispatch locations to the map"
+            "description": "First Due posts active dispatch & device locations to the map"
         }
     ],
     "invocations": {
         "incoming": {
             "schedule": {
-                "description": "Polls the First Due active dispatch API on a schedule - defaults to every 15 seconds.",
+                "description": "Polls the First Due active dispatch or device location API on a schedule - defaults to every 15 seconds.",
                 "default": {
                     "enabled": true,
                     "schedule": "rate(15 seconds)"
