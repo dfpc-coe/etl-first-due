@@ -16,6 +16,7 @@
         "outDir": "dist"
     },
     "include": [
-        "task.ts"
+        "task.ts",
+        "lib/**/*.ts"
     ]
 }

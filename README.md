@@ -39,6 +39,9 @@ Every poll retrieves the complete set of active calls. If any page fails the pol
 partial snapshot never causes calls to disappear. Pagination follows the `Link` header, re-applies `active_only=true` on
 every page (the documented examples omit it) and refuses to follow links to a different origin.
 
+Active calls are submitted against the `dispatch` named Output schema - select it in the CloudTAK Layer Schema & Styles
+panels to map or style calls. Calls that are not matched by a Mapping are delivered to the map as CoT.
+
 ### Marker Behaviour
 
 - Each call is posted with the stable ID `first-due-<id>` so changes to notes, address, or units update the existing
@@ -101,6 +104,9 @@ npm run build
 cp .env dist/
 node dist/task.js
 ```
+
+API calls to First Due - authentication, pagination & record validation - live in the `lib/firstdue.ts` client while
+`task.ts` holds the control flow and maps dispatches to features.
 
 Run the unit tests with
 

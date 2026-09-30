@@ -12,6 +12,12 @@
 
 ### Pending Release
 
+### v1.1.0
+
+- :tada: Expose `dispatch` as a named Output schema and submit active calls against it via the CloudTAK `/submit` API
+- :rocket: Move First Due API calls - authentication, `Link` pagination & record validation - into the `lib/firstdue.ts` client, leaving control flow in `task.ts`
+- :arrow_up: `@tak-ps/etl@^10.20.0`
+
 ### v1.0.0
 
 - :tada: Initial Approach - poll `GET /get-units-by-dispatches?active_only=true` every 15 seconds and post active calls to the map

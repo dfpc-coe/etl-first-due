@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import type { Static } from '@sinclair/typebox';
-import type { Feature } from '@tak-ps/node-cot';
+import type { SubmitFeatureCollection } from '@tak-ps/etl';
 
 process.env.ETL_API = process.env.ETL_API || 'http://localhost:5001';
 process.env.ETL_LAYER = process.env.ETL_LAYER || '1';
@@ -121,8 +121,8 @@ async function run(api: Mock, environment: Record<string, unknown>, ephemeral: R
         layer.incoming.ephemeral = ephem;
     };
 
-    let submitted: Static<typeof Feature.InputFeatureCollection> | null = null;
-    task.submit = async (fc: Static<typeof Feature.InputFeatureCollection>) => {
+    let submitted: Static<typeof SubmitFeatureCollection> | null = null;
+    task.submit = async (fc: Static<typeof SubmitFeatureCollection>) => {
         submitted = fc;
         return true;
     };
@@ -158,6 +158,7 @@ test('control - paginates, dedupes, drops closed & skips unlocated', async () =>
         ]);
 
         assert.ok(submitted);
+        assert.equal(submitted.schema, 'dispatch');
         assert.equal(submitted.features.length, 1);
         assert.equal(submitted.features[0].id, 'first-due-900001');
         assert.match(submitted.features[0].properties.remarks, /20:00Z Training call created/);

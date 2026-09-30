@@ -6,7 +6,7 @@
     "description": "Bring active First Due CAD dispatches into the TAK System",
     "main": "task.ts",
     "scripts": {
-        "lint": "eslint *.ts test",
+        "lint": "eslint *.ts lib test",
         "build": "tsc --build",
         "test": "tsx --test test/*.test.ts"
     },
@@ -24,6 +24,6 @@
     },
     "dependencies": {
         "@sinclair/typebox": "^0.34.0",
-        "@tak-ps/etl": "^10.0.0"
+        "@tak-ps/etl": "^10.20.0"
     }
 }

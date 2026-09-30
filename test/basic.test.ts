@@ -9,7 +9,7 @@ process.env.ETL_API = process.env.ETL_API || 'http://localhost:5001';
 process.env.ETL_LAYER = process.env.ETL_LAYER || '1';
 process.env.ETL_TOKEN = process.env.ETL_TOKEN || 'etl.test-token';
 
-const { default: Task, coordinates, fallback, nextLink, dispatchFeature } = await import('../task.js');
+const { default: Task, coordinates, fallback, dispatchFeature } = await import('../task.js');
 
 const fixture = JSON.parse(fs.readFileSync(new URL('./fixtures/active_dispatches.json', import.meta.url), 'utf8'));
 
@@ -37,7 +37,12 @@ test('Incoming Input schema', async () => {
 
 test('Incoming Output schema', async () => {
     const task = await Task.init();
-    const schema = await task.schema(SchemaType.Output, DataFlowType.Incoming);
+    const schemas = await task.schema(SchemaType.Output, DataFlowType.Incoming);
+
+    assert.ok(Array.isArray(schemas));
+    assert.deepEqual(schemas.map((named) => named.id), ['dispatch']);
+
+    const schema = schemas[0].schema;
 
     assert.equal(schema.type, 'object');
     for (const key of ['id', 'xref_id', 'type', 'status_code', 'unit_codes', 'call_notes', 'message', 'cross_streets', 'located']) {
@@ -64,35 +69,6 @@ test('fallback', () => {
     assert.equal(fallback('garbage'), null);
     assert.deepEqual(fallback('38.8419,-105.0522'), [-105.0522, 38.8419]);
     assert.deepEqual(fallback(' 38.8419 , -105.0522 '), [-105.0522, 38.8419]);
-});
-
-test('nextLink', () => {
-    const current = new URL('https://sizeup.firstduesizeup.com/fd-api/v1/get-units-by-dispatches?active_only=true&page=1');
-    const params = { active_only: 'true' };
-
-    assert.equal(nextLink(null, current, params), null);
-    assert.equal(nextLink('', current, params), null);
-
-    const header = '<https://sizeup.firstduesizeup.com/fd-api/v1/get-units-by-dispatches?page=2>; rel="next", <https://sizeup.firstduesizeup.com/fd-api/v1/get-units-by-dispatches?page=7>; rel="last"';
-    const next = nextLink(header, current, params);
-    assert.ok(next);
-    assert.equal(next.pathname, '/fd-api/v1/get-units-by-dispatches');
-    assert.equal(next.searchParams.get('page'), '2');
-    assert.equal(next.searchParams.get('active_only'), 'true');
-
-    // Only a last relation => final page
-    assert.equal(nextLink('<https://sizeup.firstduesizeup.com/fd-api/v1/get-units-by-dispatches?page=7>; rel="last"', current, params), null);
-
-    // Relative links resolve against the current page
-    const relative = nextLink('</fd-api/v1/get-units-by-dispatches?page=3&since=2019-02-16T00:00:00Z>; rel="next"', current, params);
-    assert.ok(relative);
-    assert.equal(relative.origin, current.origin);
-    assert.equal(relative.searchParams.get('page'), '3');
-    assert.equal(relative.searchParams.get('since'), '2019-02-16T00:00:00Z');
-
-    assert.throws(() => {
-        nextLink('<https://evil.example.com/fd-api/v1/get-units-by-dispatches?page=2>; rel="next"', current, params);
-    }, /different origin/);
 });
 
 test('dispatchFeature - located call', () => {

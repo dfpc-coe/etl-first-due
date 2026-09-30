@@ -1,12 +1,11 @@
 import type { Static, TSchema } from '@sinclair/typebox';
 import { Type } from '@sinclair/typebox';
-import type { Event } from '@tak-ps/etl';
+import type { Event, NamedSchema } from '@tak-ps/etl';
 import { Feature } from '@tak-ps/node-cot'
-import ETL, { SchemaType, handler as internal, local, DataFlowType, InvocationType, fetch } from '@tak-ps/etl';
+import ETL, { SchemaType, handler as internal, local, DataFlowType, InvocationType, SubmitFeatureCollection } from '@tak-ps/etl';
+import FirstDue, { Dispatch, DEFAULT_BASE_URL } from './lib/firstdue.js';
 
-const Nullable = <T extends TSchema>(type: T) => Type.Union([Type.Null(), type]);
-
-const DEFAULT_BASE_URL = 'https://sizeup.firstduesizeup.com/fd-api/v1/';
+const SCHEMA_DISPATCH = 'dispatch';
 
 const InputSchema = Type.Object({
     Email: Type.String({
@@ -41,37 +40,6 @@ const InputSchema = Type.Object({
     })
 });
 
-/**
- * Dispatch record as returned by GET /get-units-by-dispatches - the nested
- * `units` array (user names, emails & status history) is intentionally not
- * modelled and is never forwarded to the map
- */
-const Dispatch = Type.Object({
-    id: Type.Union([Type.Integer(), Type.String()]),
-    xref_id: Type.Optional(Nullable(Type.String())),
-    type: Type.Optional(Nullable(Type.String())),
-    status_code: Type.Optional(Nullable(Type.String())),
-    incident_type_code: Type.Optional(Nullable(Type.String())),
-    unit_codes: Type.Optional(Nullable(Type.Array(Type.String()))),
-    created_at: Type.Optional(Nullable(Type.String())),
-    place_name: Type.Optional(Nullable(Type.String())),
-    address: Type.Optional(Nullable(Type.String())),
-    address2: Type.Optional(Nullable(Type.String())),
-    city: Type.Optional(Nullable(Type.String())),
-    state_code: Type.Optional(Nullable(Type.String())),
-    location: Type.Optional(Nullable(Type.String())),
-    latitude: Type.Optional(Nullable(Type.Union([Type.Number(), Type.String()]))),
-    longitude: Type.Optional(Nullable(Type.Union([Type.Number(), Type.String()]))),
-    message: Type.Optional(Nullable(Type.String())),
-    call_notes: Type.Optional(Nullable(Type.String())),
-    // Only present on GET /dispatches - merged in when EnrichDispatches is enabled
-    cross_streets: Type.Optional(Nullable(Type.String())),
-    radio_channel: Type.Optional(Nullable(Type.String())),
-    alarm_level: Type.Optional(Nullable(Type.String())),
-    fire_zone: Type.Optional(Nullable(Type.String())),
-    fire_stations: Type.Optional(Nullable(Type.Array(Type.String())))
-});
-
 const OutputSchema = Type.Composite([
     Type.Omit(Dispatch, ['latitude', 'longitude']),
     Type.Object({
@@ -79,26 +47,10 @@ const OutputSchema = Type.Composite([
     })
 ]);
 
-const TokenResponse = Type.Object({
-    access_token: Type.String(),
-    token_type: Type.Optional(Type.String()),
-    expires_in: Type.Optional(Type.Integer()),
-    scope: Type.Optional(Type.String())
+const Ephemeral = Type.Object({
+    access_token: Type.Optional(Type.String()),
+    access_token_expires: Type.Optional(Type.String())
 });
-
-// Documented token lifetime is 1209600s (14 days) - refresh an hour early
-const TOKEN_LIFETIME_MS = 14 * 24 * 60 * 60 * 1000;
-const TOKEN_REFRESH_MARGIN_MS = 60 * 60 * 1000;
-
-const ACTIVE_PATH = 'get-units-by-dispatches';
-const DISPATCHES_PATH = 'dispatches';
-const MAX_PAGES = 50;
-
-type Unknowns = Record<string, unknown>;
-
-function isObject(value: unknown): value is Unknowns {
-    return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
 
 function text(value: unknown): string | null {
     if (typeof value === 'number') return String(value);
@@ -139,34 +91,6 @@ export function fallback(value?: string): [number, number] | null {
     }
 
     return [lon, lat];
-}
-
-/**
- * Resolve the rel="next" target of an RFC 5988 Link header against the page
- * that returned it. Only same-origin targets are followed and the active_only
- * filter is re-applied as the documented examples omit it
- */
-export function nextLink(header: string | null | undefined, current: URL, params: Record<string, string>): URL | null {
-    if (!header) return null;
-
-    const pattern = /<([^>]+)>\s*;\s*rel="([^"]+)"/g;
-
-    for (const match of header.matchAll(pattern)) {
-        if (!match[2].split(/\s+/).includes('next')) continue;
-
-        const next = new URL(match[1], current);
-        if (next.origin !== current.origin) {
-            throw new Error(`Refusing to follow pagination link to a different origin: ${next.origin}`);
-        }
-
-        for (const [key, value] of Object.entries(params)) {
-            next.searchParams.set(key, value);
-        }
-
-        return next;
-    }
-
-    return null;
 }
 
 function timestamp(value: unknown, fallback: Date): Date {
@@ -296,12 +220,12 @@ export default class Task extends ETL {
     async schema(
         type: SchemaType = SchemaType.Input,
         flow: DataFlowType = DataFlowType.Incoming
-    ): Promise<TSchema> {
+    ): Promise<TSchema | Array<NamedSchema>> {
         if (flow === DataFlowType.Incoming) {
             if (type === SchemaType.Input) {
                 return InputSchema;
             } else {
-                return OutputSchema;
+                return [{ id: SCHEMA_DISPATCH, schema: OutputSchema }];
             }
         } else {
             return Type.Object({});
@@ -310,31 +234,35 @@ export default class Task extends ETL {
 
     async control(): Promise<void> {
         const env = await this.env(InputSchema);
+        const ephemeral = await this.ephemeral(Ephemeral);
 
-        const base = new URL(env.BaseURL || DEFAULT_BASE_URL);
-        if (!base.pathname.endsWith('/')) base.pathname = `${base.pathname}/`;
-
-        const records = await this.controlPages(env, base, ACTIVE_PATH, { active_only: 'true' });
+        const api = new FirstDue({
+            url: env.BaseURL,
+            email: env.Email,
+            password: env.Password,
+            debug: env.DEBUG,
+            token: {
+                access_token: ephemeral.access_token,
+                expires: Number(ephemeral.access_token_expires)
+            },
+            onToken: async (token) => {
+                await this.setEphemeral({
+                    access_token: token.access_token,
+                    access_token_expires: String(token.expires)
+                });
+            }
+        });
 
         // Calls can shift between pages while paginating - keep the first copy
         const dispatches = new Map<string, Static<typeof Dispatch>>();
 
-        for (const record of records) {
-            let dispatch: Static<typeof Dispatch>;
-
-            try {
-                dispatch = this.type(Dispatch, record);
-            } catch (err) {
-                console.error(`not ok - skipping malformed dispatch: ${err instanceof Error ? err.message : String(err)}`);
-                continue;
-            }
-
+        for (const dispatch of await api.active()) {
             const id = text(dispatch.id);
             if (id && !dispatches.has(id)) dispatches.set(id, dispatch);
         }
 
         if (env.EnrichDispatches && dispatches.size) {
-            await this.controlEnrich(env, base, dispatches);
+            await this.controlEnrich(api, dispatches);
         }
 
         const opts: FeatureOptions = {
@@ -343,8 +271,9 @@ export default class Task extends ETL {
             staleMinutes: env.StaleMinutes
         };
 
-        const fc: Static<typeof Feature.InputFeatureCollection> = {
+        const fc: Static<typeof SubmitFeatureCollection> = {
             type: 'FeatureCollection',
+            schema: SCHEMA_DISPATCH,
             features: []
         };
 
@@ -359,13 +288,11 @@ export default class Task extends ETL {
     }
 
     /**
-     * GET /dispatches carries cross streets, radio channel & alarm level which
-     * the active call endpoint omits. It only filters on creation time so the
-     * oldest active call bounds the query
+     * GET /dispatches only filters on creation time so the oldest active call
+     * bounds the query
      */
     async controlEnrich(
-        env: Static<typeof InputSchema>,
-        base: URL,
+        api: FirstDue,
         dispatches: Map<string, Static<typeof Dispatch>>
     ): Promise<void> {
         let since: Date | null = null;
@@ -377,154 +304,23 @@ export default class Task extends ETL {
 
         if (!since) return;
 
-        const params: Record<string, string> = {
-            since: since.toISOString().replace(/\.\d{3}Z$/, 'Z')
-        };
-
         let matched = 0;
 
-        for (const record of await this.controlPages(env, base, DISPATCHES_PATH, params)) {
-            const id = text(record.id);
+        for (const detail of await api.dispatches(since)) {
+            const id = text(detail.id);
             const dispatch = id ? dispatches.get(id) : undefined;
             if (!dispatch) continue;
 
             matched++;
 
-            for (const key of ['cross_streets', 'radio_channel', 'alarm_level', 'fire_zone', 'fire_stations'] as const) {
-                const value = record[key];
-
-                if (key === 'fire_stations') {
-                    if (Array.isArray(value)) dispatch.fire_stations = value.filter((v): v is string => typeof v === 'string');
-                } else if (typeof value === 'string') {
-                    dispatch[key] = value;
-                }
-            }
+            dispatch.cross_streets = detail.cross_streets ?? dispatch.cross_streets;
+            dispatch.radio_channel = detail.radio_channel ?? dispatch.radio_channel;
+            dispatch.alarm_level = detail.alarm_level ?? dispatch.alarm_level;
+            dispatch.fire_zone = detail.fire_zone ?? dispatch.fire_zone;
+            dispatch.fire_stations = detail.fire_stations ?? dispatch.fire_stations;
         }
 
         console.log(`ok - enriched ${matched}/${dispatches.size} dispatches`);
-    }
-
-    /**
-     * Obtain a Bearer Token, reusing the cached token until an hour before it expires
-     */
-    async controlToken(env: Static<typeof InputSchema>, base: URL, force = false): Promise<string> {
-        const layer = await this.fetchLayer();
-        const ephemeral = layer.incoming?.ephemeral ?? {};
-
-        if (
-            !force
-            && ephemeral.access_token
-            && ephemeral.access_token_expires
-            && Number(ephemeral.access_token_expires) > +new Date()
-        ) {
-            return String(ephemeral.access_token);
-        }
-
-        console.log('ok - requesting new token');
-
-        const res = await fetch(new URL('auth/token', base), {
-            method: 'POST',
-            headers: {
-                Accept: 'application/json',
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-                grant_type: 'client_credentials',
-                email: env.Email,
-                password: env.Password
-            }),
-            safeUrlAllow: [base.origin]
-        });
-
-        if (!res.ok) {
-            throw new Error(`First Due Authentication Failed: ${res.status} ${await res.text()}`);
-        }
-
-        const token = await res.typed(TokenResponse);
-
-        const lifetime = token.expires_in ? token.expires_in * 1000 : TOKEN_LIFETIME_MS;
-        const margin = Math.min(TOKEN_REFRESH_MARGIN_MS, lifetime / 2);
-
-        await this.setEphemeral({
-            access_token: token.access_token,
-            access_token_expires: String(+new Date() + lifetime - margin)
-        });
-
-        return token.access_token;
-    }
-
-    /**
-     * Follow Link header pagination for a collection endpoint, returning every
-     * record. A single re-authentication is attempted if the cached token is
-     * rejected. Any page failure aborts the poll so a partial snapshot is never
-     * submitted
-     */
-    async controlPages(
-        env: Static<typeof InputSchema>,
-        base: URL,
-        path: string,
-        params: Record<string, string>
-    ): Promise<Unknowns[]> {
-        const records: Unknowns[] = [];
-
-        let token = await this.controlToken(env, base);
-        let refreshed = false;
-
-        let url: URL | null = new URL(path, base);
-        for (const [key, value] of Object.entries(params)) {
-            url.searchParams.set(key, value);
-        }
-
-        const visited = new Set<string>();
-
-        for (let page = 0; url && page < MAX_PAGES; page++) {
-            if (visited.has(url.toString())) {
-                throw new Error(`First Due pagination loop detected at ${url}`);
-            }
-            visited.add(url.toString());
-
-            let res = await this.controlPage(base, url, token);
-
-            if (res.status === 401 && !refreshed) {
-                console.log('ok - cached token rejected, re-authenticating');
-                refreshed = true;
-                token = await this.controlToken(env, base, true);
-                res = await this.controlPage(base, url, token);
-            }
-
-            if (!res.ok) {
-                throw new Error(`First Due ${path} Failed: ${res.status} ${await res.text()}`);
-            }
-
-            const body = await res.json() as unknown;
-
-            if (env.DEBUG) console.error(`DEBUG - ${url}: ${JSON.stringify(body)}`);
-
-            if (!Array.isArray(body)) {
-                throw new Error(`First Due ${path} returned an unexpected response shape`);
-            }
-
-            records.push(...body.filter(isObject));
-
-            url = nextLink(res.headers.get('link'), url, params);
-
-            if (url && page === MAX_PAGES - 1) {
-                console.log(`ok - MAX_PAGES (${MAX_PAGES}) reached, ${path} results were truncated`);
-            }
-        }
-
-        return records;
-    }
-
-    async controlPage(base: URL, url: URL, token: string) {
-        return await fetch(url, {
-            method: 'GET',
-            headers: {
-                Accept: 'application/json',
-                Authorization: `Bearer ${token}`
-            },
-            safeUrlAllow: [base.origin]
-        });
     }
 }
 
