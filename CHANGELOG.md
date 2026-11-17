@@ -10,6 +10,18 @@
 
 ## Version History
 
+### Pending Release
+
+### v1.4.0 - 2026-11-17
+
+- :rocket: `DataType: CAD` writes active dispatches to CloudTAK Events with their `unit_codes` as Assignments instead of posting CoT markers - calls that leave the active feed are ended. Layers require the `event:*` & `assignment:*` permissions
+- :tada: Geocode unlocated dispatches via the CloudTAK Search API when the layer has `search:read`, bounded by the new `BoundingBox` input
+- :tada: Add `ExpireHours` input - `StaleMinutes` now only applies to `AVL` layers
+- :arrow_up: Update `@tak-ps/etl` to 11.x - Output schemas are published as named schemas, as required by CloudTAK v14
+- :arrow_up: Migrate to TS7 for blazing build times
+- :arrow_up: Migrate off ESLint onto OXLint for blazing lint times
+- :bug: Fix numerous small bugs in the codebase surfaced by OXLint
+
 ### v1.3.0
 
 - :arrow_up: Update Core Dependencies
@@ -17,8 +29,6 @@
 ### v1.2.0
 
 - :arrow_up: Update Core Dependencies
-
-### Pending Release
 
 ### v1.2.0
 

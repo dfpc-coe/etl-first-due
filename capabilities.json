@@ -1,7 +1,7 @@
 {
     "version": "1.0",
     "name": "First Due",
-    "description": "Ingests active CAD dispatches or AVL device locations from the First Due REST API and posts each call - location, address, assigned units, dispatch message and call notes - or device to the map.",
+    "description": "Ingests active CAD dispatches or AVL device locations from the First Due REST API - active dispatches are written to CloudTAK Events with their dispatched units as Assignments, AVL device locations are posted to the map.",
     "compute": {
         "memory": 512,
         "timeout": 60
@@ -10,7 +10,47 @@
         {
             "resource": "feature:*",
             "required": true,
-            "description": "First Due posts active dispatch & device locations to the map"
+            "description": "First Due posts AVL device locations to the map when DataType is AVL"
+        },
+        {
+            "resource": "event:create",
+            "required": true,
+            "description": "First Due creates an Event for every active dispatch"
+        },
+        {
+            "resource": "event:read",
+            "required": true,
+            "description": "First Due looks up the Event previously created for a dispatch when its cache has no record of it"
+        },
+        {
+            "resource": "event:update",
+            "required": true,
+            "description": "First Due updates Events as dispatches change and ends them when the call closes"
+        },
+        {
+            "resource": "assignment:create",
+            "required": true,
+            "description": "First Due assigns the units dispatched to a call to its Event"
+        },
+        {
+            "resource": "assignment:read",
+            "required": true,
+            "description": "First Due reads the Assignments of an Event to reconcile them with the units currently dispatched"
+        },
+        {
+            "resource": "assignment:update",
+            "required": true,
+            "description": "First Due updates the Assignments of the units dispatched to a call"
+        },
+        {
+            "resource": "assignment:delete",
+            "required": true,
+            "description": "First Due removes units that are no longer dispatched to a call"
+        },
+        {
+            "resource": "search:read",
+            "required": false,
+            "description": "First Due geocodes dispatch addresses that have no coordinates via the CloudTAK search API"
         }
     ],
     "invocations": {

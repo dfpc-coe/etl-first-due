@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert';
 import http from 'node:http';
+import { once } from 'node:events';
 import type { AddressInfo } from 'node:net';
 import FirstDue, { nextLink } from '../lib/firstdue.js';
 import type { Token } from '../lib/firstdue.js';
@@ -39,7 +40,8 @@ test('FirstDue - caches issued tokens & skips malformed records', async () => {
         res.setHeader('Content-Type', 'application/json');
 
         if (req.url === '/fd-api/v1/auth/token') {
-            return res.end(JSON.stringify({ access_token: 'token-1', expires_in: 7200 }));
+            res.end(JSON.stringify({ access_token: 'token-1', expires_in: 7200 }));
+            return;
         }
 
         res.end(JSON.stringify([
@@ -51,7 +53,7 @@ test('FirstDue - caches issued tokens & skips malformed records', async () => {
         ]));
     });
 
-    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    await once(server.listen(0, '127.0.0.1'), 'listening');
 
     try {
         const tokens: Token[] = [];
@@ -61,7 +63,7 @@ test('FirstDue - caches issued tokens & skips malformed records', async () => {
             url: `http://127.0.0.1:${(server.address() as AddressInfo).port}/fd-api/v1`,
             email: 'api@example.com',
             password: 'secret',
-            token: { access_token: 'expired', expires: +new Date() - 1000 },
+            token: { access_token: 'expired', expires: Date.now() - 1000 },
             onToken: async (token) => {
                 tokens.push(token);
             }
@@ -73,12 +75,12 @@ test('FirstDue - caches issued tokens & skips malformed records', async () => {
         assert.equal(tokens[0].access_token, 'token-1');
 
         // A 2 hour token is refreshed an hour early
-        const remaining = tokens[0].expires - +new Date();
+        const remaining = tokens[0].expires - Date.now();
         assert.ok(remaining > 59 * 60 * 1000 && remaining <= 60 * 60 * 1000);
 
         await api.active();
         assert.equal(tokens.length, 1);
     } finally {
-        await new Promise<void>((resolve) => server.close(() => resolve()));
+        await once(server.close(), 'close');
     }
 });

@@ -146,14 +146,14 @@ export default class FirstDue {
         this.debug = opts.debug ?? false;
         this.onToken = opts.onToken;
 
-        if (opts.token?.access_token && opts.token.expires && opts.token.expires > +new Date()) {
+        if (opts.token?.access_token && (opts.token.expires ?? 0) > Date.now()) {
             this.token = opts.token.access_token;
         }
     }
 
     /** Active calls - GET /get-units-by-dispatches?active_only=true */
     async active(): Promise<Array<Static<typeof Dispatch>>> {
-        return await this.list(ACTIVE_PATH, Dispatch, { active_only: 'true' });
+        return this.list(ACTIVE_PATH, Dispatch, { active_only: 'true' });
     }
 
     /**
@@ -161,14 +161,14 @@ export default class FirstDue {
      * the active call endpoint omits. It only filters on creation time
      */
     async dispatches(since: Date): Promise<Array<Static<typeof DispatchDetail>>> {
-        return await this.list(DISPATCHES_PATH, DispatchDetail, {
+        return this.list(DISPATCHES_PATH, DispatchDetail, {
             since: since.toISOString().replace(/\.\d{3}Z$/, 'Z')
         });
     }
 
     /** AVL device locations - GET /device-locations */
     async devices(): Promise<Array<Static<typeof DeviceLocation>>> {
-        return await this.list(DEVICES_PATH, DeviceLocation, {});
+        return this.list(DEVICES_PATH, DeviceLocation, {});
     }
 
     /** Request a Bearer Token, expiring it an hour before First Due does */
@@ -195,7 +195,7 @@ export default class FirstDue {
 
         const token = await res.typed(TokenResponse);
 
-        const lifetime = token.expires_in ? token.expires_in * 1000 : TOKEN_LIFETIME_MS;
+        const lifetime = token.expires_in !== undefined && token.expires_in !== 0 ? token.expires_in * 1000 : TOKEN_LIFETIME_MS;
         const margin = Math.min(TOKEN_REFRESH_MARGIN_MS, lifetime / 2);
 
         this.token = token.access_token;
@@ -203,7 +203,7 @@ export default class FirstDue {
         if (this.onToken) {
             await this.onToken({
                 access_token: token.access_token,
-                expires: +new Date() + lifetime - margin
+                expires: Date.now() + lifetime - margin
             });
         }
 
@@ -254,12 +254,12 @@ export default class FirstDue {
                 throw new Error(`First Due ${path} Failed: ${res.status} ${await res.text()}`);
             }
 
-            const body = await res.json() as unknown;
+            const body: unknown = await res.json();
 
             if (this.debug) console.error(`DEBUG - ${url}: ${JSON.stringify(body)}`);
 
             if (!Array.isArray(body)) {
-                throw new Error(`First Due ${path} returned an unexpected response shape`);
+                throw new TypeError(`First Due ${path} returned an unexpected response shape`);
             }
 
             for (const record of body) {
@@ -281,7 +281,7 @@ export default class FirstDue {
     }
 
     private async request(url: URL, token: string) {
-        return await fetch(url, {
+        return fetch(url, {
             method: 'GET',
             headers: {
                 Accept: 'application/json',

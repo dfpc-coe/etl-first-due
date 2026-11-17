@@ -18,15 +18,20 @@
 | `Email` | Yes | Email of the First Due API service account |
 | `Password` | Yes | Password of the First Due API service account |
 | `BaseURL` | No | Base URL of the First Due REST API - defaults to `https://sizeup.firstduesizeup.com/fd-api/v1/` |
-| `DataType` | No | `CAD` posts active dispatch locations, `AVL` posts device locations - defaults to `CAD` |
-| `IncludeNotes` | No | CAD Only: Include the CAD dispatch `message` and `call_notes` in the marker remarks - defaults to `true` |
+| `DataType` | No | `CAD` writes active dispatches to CloudTAK Events with their dispatched units as Assignments, `AVL` posts device locations to the map - defaults to `CAD` |
+| `IncludeNotes` | No | CAD Only: Include the CAD dispatch `message` and `call_notes` in the Event remarks - defaults to `true` |
 | `EnrichDispatches` | No | CAD Only: Also query `GET /dispatches` to add cross streets, radio channel and alarm level. Roughly doubles the number of API requests per poll - defaults to `false` |
-| `FallbackCoordinates` | No | CAD Only: `Latitude,Longitude` used to place calls that have no verified coordinates - ie `38.8419,-105.0522`. Unlocated calls are skipped when unset |
-| `StaleMinutes` | No | Minutes after the last successful poll before a marker is shown as stale on TAK clients - defaults to `10` |
+| `BoundingBox` | No | CAD Only: `minLon,minLat,maxLon,maxLat` of acceptable geocoded locations - ie `-105.4,39.5,-104.6,40.0`. Geocoded results outside of the box are discarded |
+| `FallbackCoordinates` | No | CAD Only: `Latitude,Longitude` used to place calls that have no verified coordinates and could not be geocoded - ie `38.8419,-105.0522`. Unlocated calls are skipped when unset |
+| `ExpireHours` | No | CAD Only: Hours after the last poll at which a dispatch Event ends on its own if the layer stops reporting - defaults to `1` |
+| `StaleMinutes` | No | AVL Only: Minutes after the last successful poll before a device is shown as stale on TAK clients - defaults to `10` |
 | `DEBUG` | No | Print raw API responses in the layer logs |
 
-A layer posts either CAD or AVL data. To bring both into TAK, create two layers that share the same credentials - one
+A layer handles either CAD or AVL data. To bring both into TAK, create two layers that share the same credentials - one
 with `DataType: CAD` and one with `DataType: AVL`.
+
+The task exposes two named Output schemas - `dispatch` (active calls, attached to each Event as metadata) and `device`
+(AVL device locations) - an `AVL` layer selects `device` in the CloudTAK Layer Schema & Styles panels.
 
 ## How it Works
 
@@ -40,31 +45,37 @@ with `DataType: CAD` and one with `DataType: AVL`.
 The Bearer token is cached in the layer's ephemeral store and reused until an hour before it expires. If First Due rejects
 the cached token the ETL re-authenticates once and retries the request.
 
-Every poll retrieves the complete set of active calls or device locations. If any page fails the poll is aborted and nothing is submitted so a
-partial snapshot never causes calls to disappear. Pagination follows the `Link` header, re-applies `active_only=true` on
-every page (the documented examples omit it) and refuses to follow links to a different origin.
+Every poll retrieves the complete set of active calls or device locations. If any page fails the poll is aborted and nothing
+is written so a partial snapshot never causes calls to be ended. Pagination follows the `Link` header, re-applies
+`active_only=true` on every page (the documented examples omit it) and refuses to follow links to a different origin.
 
-The task exposes two named Output schemas - `dispatch` (active calls) and `device` (AVL device locations) - select the
-schema matching the layer's `DataType` in the CloudTAK Layer Schema & Styles panels. Features are submitted through the
-layer CoT API so the layer's styling is applied to them.
+### Events
 
-### Marker Behaviour
+- Each active dispatch is written to one CloudTAK Event filed under the external ID `{ system: 'first-due', value: <id> }`,
+  so changes to notes, address or units update the existing Event rather than creating a duplicate.
+- The Event name is `<type> (<xref_id>)` - the CAD/external reference is used when present, otherwise the First Due ID.
+  The address is the Event location and `created_at` is its start time. First Due exposes no call priority, so Events are
+  unprioritised.
+- Remarks carry the call reference, type, status, place name, cross streets, radio channel, stations and - when
+  `IncludeNotes` is enabled - the dispatch message and call notes.
+- Every code in `unit_codes` becomes an Assignment on the Event marked with the remark `First Due CAD Unit`. Units that
+  leave the call are removed; people assigned by users are left alone. The nested `units` array - responder names,
+  emails and status history - is never read, so an Assignment carries no status and nothing is written to the Timeline.
+- The full dispatch record (minus coordinates and the nested `units` array) is attached as the Event metadata.
+- The ID and a digest of the last state written for each call are cached in the layer's ephemeral store. An unchanged
+  call costs no CloudTAK API calls. If the cache is lost the Event is found again by its external ID.
+- Closed or cancelled calls drop out of the active feed and their Events are ended. Every write also sets the Event to end
+  `ExpireHours` later and an unchanged call has its expiry pushed out once half of that window has elapsed, so if the
+  layer stops polling its Events end on their own.
 
-- Each call is posted with the stable ID `first-due-<id>` so changes to notes, address, or units update the existing
-  marker rather than creating a duplicate. A reopened call reuses the same ID and reappears.
-- The marker callsign is `<type> (<xref_id>)` - the CAD/external reference is used when present, otherwise the First Due
-  ID.
-- Remarks carry the call reference, type, status, creation time, place name, address, cross streets, radio channel,
-  assigned units and - when `IncludeNotes` is enabled - the dispatch message and call notes.
-- The full dispatch record (minus coordinates and the nested `units` array, which contains responder names and emails) is
-  available in the feature metadata.
-- Closed or cancelled calls drop out of the active feed and are no longer posted. TAK clients remove them once the
-  `StaleMinutes` window elapses.
-- If a poll fails, no update is sent and the existing markers are shown as stale by TAK clients once `StaleMinutes`
-  elapses - a call is never shown as current without a successful poll behind it.
-- Calls with missing, non-numeric, out of range or `0,0` coordinates are unlocated. When `FallbackCoordinates` is set
-  they are placed there with an `UNLOCATED - ` callsign prefix, a `Location: UNVERIFIED` remark and `located: false` in
-  the metadata. When unset they are skipped.
+### Locations
+
+- Calls with missing, non-numeric, out of range or `0,0` coordinates are unlocated.
+- When the layer has the `search:read` permission the call's address is geocoded through the CloudTAK Search API.
+  Results outside of `BoundingBox` are discarded. A geocoded call carries a `Location: Geocoded` remark.
+- Otherwise, when `FallbackCoordinates` is set the call is placed there with an `UNLOCATED - ` name prefix and a
+  `Location: UNVERIFIED` remark. When unset the call is skipped.
+- `located` is `false` in the metadata of every call that was not placed by CAD supplied coordinates.
 
 ### AVL Marker Behaviour
 
@@ -88,6 +99,7 @@ layer CoT API so the layer's styling is applied to them.
 - Whether `call_notes` reflects the complete current CAD narrative, including later corrections, depends on the agency's
   CAD to First Due integration and should be verified during a pilot.
 - Retrieval is capped at 50 pages (1000 active calls) per poll.
+- An unlocated call is geocoded again on every poll for as long as it stays unlocated.
 - First Due documents a single example of `GET /device-locations` with no parameters or pagination. `Link` header
   pagination is followed if it is returned. Devices can be apparatus or the mobile devices of individual responders -
   confirm with the agency which devices report before sharing the layer.
@@ -125,8 +137,9 @@ node dist/task.js
 ```
 
 `task.ts` holds only the control flow. API calls to First Due - authentication, pagination & record validation - live in
-the `lib/firstdue.ts` client, `lib/features.ts` maps dispatches & devices to CoT features and defines the Output schemas,
-and `lib/parse.ts` holds the value coercion helpers.
+the `lib/firstdue.ts` client, `lib/cad.ts` maps dispatches to Events & devices to CoT features and defines the Output
+schemas, `lib/events.ts` keeps CloudTAK Events & Assignments in step with the active calls and `lib/geocode.ts` wraps the
+CloudTAK Search API.
 
 Run the unit tests with
 
