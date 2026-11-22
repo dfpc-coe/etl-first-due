@@ -16,6 +16,7 @@ import {
     deviceFeature,
     dispatchId,
     isOpen,
+    isRecent,
     parseBBox,
     parseFallback,
     parseTimestamp
@@ -64,6 +65,11 @@ const InputSchema = Type.Object({
     FallbackCoordinates: Type.Optional(Type.String({
         description: 'CAD Only: Latitude,Longitude used to place calls that have no verified coordinates (and that could not be geocoded) - ie 38.8419,-105.0522. Unlocated calls are skipped when unset'
     })),
+    MaxAgeHours: Type.Number({
+        default: 24,
+        minimum: 0,
+        description: 'CAD Only: Ignore dispatches created more than this many hours ago, even if First Due still reports them as open - 0 disables the limit'
+    }),
     ExpireHours: Type.Number({
         default: 1,
         minimum: 0.25,
@@ -166,10 +172,23 @@ export default class Task extends ETL {
         // Calls can shift between pages while paginating - keep the first copy
         const dispatches = new Map<string, Static<typeof Dispatch>>();
 
-        for (const dispatch of await api.active()) {
+        const since = env.MaxAgeHours > 0 ? new Date(Date.now() - env.MaxAgeHours * 60 * 60 * 1000) : undefined;
+
+        let aged = 0;
+
+        for (const dispatch of await api.active(since)) {
             const id = dispatchId(dispatch);
-            if (id && isOpen(dispatch) && !dispatches.has(id)) dispatches.set(id, dispatch);
+            if (!id || !isOpen(dispatch) || dispatches.has(id)) continue;
+
+            if (!isRecent(dispatch, since)) {
+                aged++;
+                continue;
+            }
+
+            dispatches.set(id, dispatch);
         }
+
+        if (aged > 0) console.log(`ok - ignored ${aged} open dispatches older than ${env.MaxAgeHours} hours`);
 
         if (env.EnrichDispatches && dispatches.size > 0) {
             await this.controlEnrich(api, dispatches);

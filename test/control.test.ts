@@ -213,6 +213,7 @@ function environment(api: Mock, values: Record<string, unknown> = {}): Record<st
         BaseURL: `${api.base}/fd-api/v1/`,
         IncludeNotes: true,
         EnrichDispatches: false,
+        MaxAgeHours: 0,
         ExpireHours: 1,
         StaleMinutes: 10,
         DEBUG: false,
@@ -252,6 +253,26 @@ test('control - paginates, dedupes, drops closed & skips unlocated', async () =>
         const events = ephemeral.events as Record<string, { id: string }>;
         assert.deepEqual(Object.keys(events), ['900001']);
         assert.equal(events['900001'].id, 'evt-1');
+    } finally {
+        await api.close();
+    }
+});
+
+test('control - open dispatches older than MaxAgeHours are ignored & their Events ended', async () => {
+    const api = await mock();
+
+    try {
+        const first = await run(environment(api));
+        assert.deepEqual(Object.keys(first.ephemeral.events as object), ['900001']);
+
+        const second = await run(environment(api, { MaxAgeHours: 24 }), { ephemeral: first.ephemeral });
+
+        const feed = new URL(api.requests.at(-1)?.url ?? '', api.base);
+        assert.equal(feed.searchParams.get('active_only'), 'true');
+        assert.match(feed.searchParams.get('since') ?? '', /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/);
+
+        assert.deepEqual(second.calls, [{ method: 'Event.update', args: ['evt-1', { active: false }] }]);
+        assert.deepEqual(second.ephemeral.events, {});
     } finally {
         await api.close();
     }

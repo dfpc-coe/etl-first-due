@@ -23,6 +23,7 @@
 | `EnrichDispatches` | No | CAD Only: Also query `GET /dispatches` to add cross streets, radio channel and alarm level. Roughly doubles the number of API requests per poll - defaults to `false` |
 | `BoundingBox` | No | CAD Only: `minLon,minLat,maxLon,maxLat` of acceptable geocoded locations - ie `-105.4,39.5,-104.6,40.0`. Geocoded results outside of the box are discarded |
 | `FallbackCoordinates` | No | CAD Only: `Latitude,Longitude` used to place calls that have no verified coordinates and could not be geocoded - ie `38.8419,-105.0522`. Unlocated calls are skipped when unset |
+| `MaxAgeHours` | No | CAD Only: Ignore dispatches created more than this many hours ago, even if First Due still reports them as open. `0` disables the limit - defaults to `24` |
 | `ExpireHours` | No | CAD Only: Hours after the last poll at which a dispatch Event ends on its own if the layer stops reporting - defaults to `1` |
 | `StaleMinutes` | No | AVL Only: Minutes after the last successful poll before a device is shown as stale on TAK clients - defaults to `10` |
 | `DEBUG` | No | Print raw API responses in the layer logs |
@@ -38,7 +39,7 @@ The task exposes two named Output schemas - `dispatch` (active calls, attached t
 | Step | Endpoint | Notes |
 | ---- | -------- | ----- |
 | Authenticate | `POST /auth/token` | JSON body with `grant_type: client_credentials`, `email` & `password`. Returns a Bearer token valid for 14 days |
-| Active Calls | `GET /get-units-by-dispatches?active_only=true` | Paginated 20 per page via the `Link` header `rel="next"` relation |
+| Active Calls | `GET /get-units-by-dispatches?active_only=true&since=<now - MaxAgeHours>` | `since` filters on `created_at` and is omitted when `MaxAgeHours` is `0`. Paginated 20 per page via the `Link` header `rel="next"` relation |
 | Enrich (optional) | `GET /dispatches?since=<oldest active created_at>` | Adds `cross_streets`, `radio_channel`, `alarm_level`, `fire_zone` & `fire_stations` |
 | Device Locations | `GET /device-locations` | Only requested when `DataType` is `AVL` - replaces the Active Calls & Enrich steps |
 
@@ -64,6 +65,8 @@ is written so a partial snapshot never causes calls to be ended. Pagination foll
 - The full dispatch record (minus coordinates and the nested `units` array) is attached as the Event metadata.
 - The ID and a digest of the last state written for each call are cached in the layer's ephemeral store. An unchanged
   call costs no CloudTAK API calls. If the cache is lost the Event is found again by its external ID.
+- Calls that are never closed in CAD stay in the active feed indefinitely. Dispatches created more than `MaxAgeHours`
+  ago are ignored and any Event already written for them is ended.
 - Closed or cancelled calls drop out of the active feed and their Events are ended. Every write also sets the Event to end
   `ExpireHours` later and an unchanged call has its expiry pushed out once half of that window has elapsed, so if the
   layer stops polling its Events end on their own.

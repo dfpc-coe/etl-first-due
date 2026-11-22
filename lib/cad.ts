@@ -110,6 +110,13 @@ export function isOpen(dispatch: Pick<Static<typeof Dispatch>, 'status_code'>): 
     return !status || status === 'open';
 }
 
+/** Calls that are never closed in CAD stay in the active feed indefinitely */
+export function isRecent(dispatch: Pick<Static<typeof Dispatch>, 'created_at'>, since: Date | undefined): boolean {
+    if (!since) return true;
+    const created = parseTimestamp(dispatch.created_at);
+    return !created || created >= since;
+}
+
 export function addressLine(dispatch: Static<typeof Dispatch>): string | null {
     const street = [text(dispatch.address), text(dispatch.address2)].filter((part) => part !== null).join(' ');
     const parts = [street || null, text(dispatch.city), text(dispatch.state_code)].filter((part) => part !== null);

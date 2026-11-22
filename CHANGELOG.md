@@ -10,11 +10,17 @@
 
 ## Version History
 
+### v1.6.0 - 2026-11-22
+
+- :bug: Fix `MaxAgeHours` input - dispatches left open in CAD long after they were created are no longer written as Events
+
 ### v1.5.0
 
 - :arrow_up: Update Core Dependencies
 
 ### Pending Release
+
+- :bug: Add `MaxAgeHours` input (default `24`) - dispatches left open in CAD long after they were created are no longer written as Events
 
 ### v1.4.0 - 2026-11-17
 

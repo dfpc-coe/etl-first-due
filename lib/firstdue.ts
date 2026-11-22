@@ -97,6 +97,10 @@ export type FirstDueOptions = {
     onToken?: (token: Token) => Promise<void>;
 };
 
+function timestamp(date: Date): string {
+    return date.toISOString().replace(/\.\d{3}Z$/, 'Z');
+}
+
 /**
  * Resolve the rel="next" target of an RFC 5988 Link header against the page
  * that returned it. Only same-origin targets are followed and the active_only
@@ -151,9 +155,11 @@ export default class FirstDue {
         }
     }
 
-    /** Active calls - GET /get-units-by-dispatches?active_only=true */
-    async active(): Promise<Array<Static<typeof Dispatch>>> {
-        return this.list(ACTIVE_PATH, Dispatch, { active_only: 'true' });
+    /** Active calls - GET /get-units-by-dispatches?active_only=true - optionally created on or after `since` */
+    async active(since?: Date): Promise<Array<Static<typeof Dispatch>>> {
+        const params: Record<string, string> = { active_only: 'true' };
+        if (since) params.since = timestamp(since);
+        return this.list(ACTIVE_PATH, Dispatch, params);
     }
 
     /**
@@ -162,7 +168,7 @@ export default class FirstDue {
      */
     async dispatches(since: Date): Promise<Array<Static<typeof DispatchDetail>>> {
         return this.list(DISPATCHES_PATH, DispatchDetail, {
-            since: since.toISOString().replace(/\.\d{3}Z$/, 'Z')
+            since: timestamp(since)
         });
     }
 
